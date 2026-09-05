@@ -200,7 +200,12 @@ public class Pose implements dev.geco.gsit.model.Pose {
         serverPlayer.getEntityData().set(LEFT_SHOULDER_ACCESSOR, OptionalInt.empty());
         serverPlayer.getEntityData().set(RIGHT_SHOULDER_ACCESSOR, OptionalInt.empty());
 
+        // 关键修复：最早设置隐身，并立即同步到客户端
         serverPlayer.setInvisible(true);
+        ClientboundSetEntityDataPacket earlyInvisiblePacket = new ClientboundSetEntityDataPacket(
+            serverPlayer.getId(),
+            serverPlayer.getEntityData().getNonDefaultValues()
+        );
 
         setEquipmentVisibility(false);
 
@@ -225,7 +230,11 @@ public class Pose implements dev.geco.gsit.model.Pose {
 
         bundle = new ClientboundBundlePacket(packages);
 
-        for(Player nearbyPlayer : nearbyPlayers) addViewerPlayer(nearbyPlayer);
+        for(Player nearbyPlayer : nearbyPlayers) {
+            // 先发送隐身包，确保真实玩家隐身
+            sendPacket(nearbyPlayer, earlyInvisiblePacket);
+            addViewerPlayer(nearbyPlayer);
+        }
 
         hideNameEntity.setVehicle(playerNpc);
         List<Packet<? super ClientGamePacketListener>> playerPackages = new ArrayList<>();
@@ -253,7 +262,8 @@ public class Pose implements dev.geco.gsit.model.Pose {
 
             if(poseType != PoseType.SPIN) updateDirection();
 
-            serverPlayer.setInvisible(true);
+            // 关键修复：先强制同步隐身状态到所有客户端
+            forceInvisibleState();
 
             updateEquipment();
 
@@ -401,7 +411,31 @@ public class Pose implements dev.geco.gsit.model.Pose {
 
         ClientboundSetEquipmentPacket setEquipmentPacket = new ClientboundSetEquipmentPacket(serverPlayer.getId(), equipmentList);
 
-        for(Player nearbyPlayer : nearbyPlayers) sendPacket(nearbyPlayer, setEquipmentPacket);
+        for(Player nearbyPlayer : nearbyPlayers) {
+            sendPacket(nearbyPlayer, setEquipmentPacket);
+            if(!visibility) forceInvisibleToPlayer(nearbyPlayer);
+        }
+    }
+
+    private void forceInvisibleState() {
+        serverPlayer.setInvisible(true);
+        // 立即发送隐身元数据包到所有附近玩家，确保客户端同步
+        ClientboundSetEntityDataPacket invisiblePacket = new ClientboundSetEntityDataPacket(
+            serverPlayer.getId(),
+            serverPlayer.getEntityData().getNonDefaultValues()
+        );
+        for(Player nearbyPlayer : nearbyPlayers) {
+            sendPacket(nearbyPlayer, invisiblePacket);
+        }
+    }
+
+    private void forceInvisibleToPlayer(Player player) {
+        serverPlayer.setInvisible(true);
+        ClientboundSetEntityDataPacket invisiblePacket = new ClientboundSetEntityDataPacket(
+            serverPlayer.getId(),
+            serverPlayer.getEntityData().getNonDefaultValues()
+        );
+        sendPacket(player, invisiblePacket);
     }
 
     private void playAnimation(int animationId) {
